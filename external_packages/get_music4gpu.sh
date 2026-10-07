@@ -24,7 +24,8 @@ folderName="music4gpu"
 # hanging (MUSIC4GPU PR #11), the parallel, deterministic freeze-out surface search
 # (MUSIC4GPU PR #12), and the GPU fix for grids freezing in dilute regions: vacuum
 # cells at rest, a guard against non-finite W^{mu nu}/Pi with a counter and warning
-# (MUSIC_ABORT_ON_NONFINITE=1 stops instead), see VacReset_BUG.md (MUSIC4GPU PR #13),
+# (MUSIC_ABORT_ON_NONFINITE=1 stops instead), see MUSIC4GPU docs/VacReset_BUG.md (PR #13;
+# at the top level in the pinned commit),
 # and the in-memory evolution store releasing its memory when an event is cleaned
 # instead of keeping its largest size for the whole run (MUSIC4GPU PR #15)
 commitHash="49439c034f29f8b4a38d2f9b9f452cc8e7423f71"
