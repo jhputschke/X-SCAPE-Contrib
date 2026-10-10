@@ -24,11 +24,14 @@ folderName="music4gpu"
 # hanging (MUSIC4GPU PR #11), the parallel, deterministic freeze-out surface search
 # (MUSIC4GPU PR #12), and the GPU fix for grids freezing in dilute regions: vacuum
 # cells at rest, a guard against non-finite W^{mu nu}/Pi with a counter and warning
-# (MUSIC_ABORT_ON_NONFINITE=1 stops instead), see MUSIC4GPU docs/VacReset_BUG.md (PR #13;
-# at the top level in the pinned commit),
-# and the in-memory evolution store releasing its memory when an event is cleaned
-# instead of keeping its largest size for the whole run (MUSIC4GPU PR #15)
-commitHash="49439c034f29f8b4a38d2f9b9f452cc8e7423f71"
+# (MUSIC_ABORT_ON_NONFINITE=1 stops instead), see MUSIC4GPU docs/VacReset_BUG.md (PR #13),
+# the in-memory evolution store releasing its memory when an event is cleaned
+# instead of keeping its largest size for the whole run (MUSIC4GPU PR #15),
+# and less host CPU per event (MUSIC4GPU PR #18): MUSIC_CUDA_SYNC=block|yield|spin|auto
+# selects how the host waits for the GPU (unset keeps CUDA's default), and the string
+# source computes per-string constants once per step and skips zero envelopes and,
+# without preflow, the transverse-flow terms (output bit-identical)
+commitHash="bc8543af87aa992ae27de2e2a7d3541cd495a7e7"
 
 git clone https://github.com/jhputschke/MUSIC4GPU.git -b XSCAPE $folderName
 cd $folderName

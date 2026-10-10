@@ -14,6 +14,14 @@
  * See COPYING for details.
  ******************************************************************************/
 
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <string>
 #include "LBT.h"
 #include "JetScapeLogger.h"
 #include "JetScapeXML.h"
@@ -60,21 +68,147 @@ double LBT::RHQ11[60][20] = {{0.0}};   // Qq->Qq
 double LBT::RHQ12[60][20] = {{0.0}};   // Qg->Qg
 double LBT::qhatHQ[60][20] = {{0.0}};  // qhat of heavy quark
 
-double LBT::dNg_over_dt_c[t_gn + 2][temp_gn + 1][HQener_gn + 1] = {{{0.0}}};
-double LBT::dNg_over_dt_q[t_gn + 2][temp_gn + 1][HQener_gn + 1] = {{{0.0}}};
-double LBT::dNg_over_dt_g[t_gn + 2][temp_gn + 1][HQener_gn + 1] = {{{0.0}}};
-double LBT::max_dNgfnc_c[t_gn + 2][temp_gn + 1][HQener_gn + 1] = {{{0.0}}};
-double LBT::max_dNgfnc_q[t_gn + 2][temp_gn + 1][HQener_gn + 1] = {{{0.0}}};
-double LBT::max_dNgfnc_g[t_gn + 2][temp_gn + 1][HQener_gn + 1] = {{{0.0}}};
+double (*LBT::dNg_over_dt_c)[temp_gn + 1][HQener_gn + 1] = nullptr;
+double (*LBT::dNg_over_dt_q)[temp_gn + 1][HQener_gn + 1] = nullptr;
+double (*LBT::dNg_over_dt_g)[temp_gn + 1][HQener_gn + 1] = nullptr;
+double (*LBT::max_dNgfnc_c)[temp_gn + 1][HQener_gn + 1] = nullptr;
+double (*LBT::max_dNgfnc_q)[temp_gn + 1][HQener_gn + 1] = nullptr;
+double (*LBT::max_dNgfnc_g)[temp_gn + 1][HQener_gn + 1] = nullptr;
 
 double LBT::initMCX[maxMC] = {0.0};
 double LBT::initMCY[maxMC] = {0.0};
-double LBT::distFncB[N_T][N_p1][N_e2] = {{{0.0}}};
-double LBT::distFncF[N_T][N_p1][N_e2] = {{{0.0}}};
-double LBT::distMaxB[N_T][N_p1][N_e2] = {{{0.0}}};
-double LBT::distMaxF[N_T][N_p1][N_e2] = {{{0.0}}};
-double LBT::distFncBM[N_T][N_p1] = {{0.0}};
-double LBT::distFncFM[N_T][N_p1] = {{0.0}};
+double (*LBT::distFncB)[N_p1][N_e2] = nullptr;
+double (*LBT::distFncF)[N_p1][N_e2] = nullptr;
+double (*LBT::distMaxB)[N_p1][N_e2] = nullptr;
+double (*LBT::distMaxF)[N_p1][N_e2] = nullptr;
+double (*LBT::distFncBM)[N_p1] = nullptr;
+double (*LBT::distFncFM)[N_p1] = nullptr;
+
+double *LBT::table_block_ = nullptr;
+
+// ---- the 12 big tables in one block --------------------------------------------------
+// Layout (doubles): a 10-double header, then dNg_over_dt_c/q/g and max_dNgfnc_c/q/g
+// ([t_gn+2][temp_gn+1][HQener_gn+1] each), distFncB/F and distMaxB/F ([N_T][N_p1][N_e2]),
+// distFncBM/FM ([N_T][N_p1]).  With $LBT_TABLE_CACHE the block is a file mapped read-only
+// and shared by every process; read_tables() fills it only when it parses the text files.
+static const std::size_t kLbtHeader = 10;
+
+std::size_t LBT::TableBlockDoubles() {
+  const std::size_t dng = std::size_t(t_gn + 2) * (temp_gn + 1) * (HQener_gn + 1);
+  const std::size_t d3 = std::size_t(N_T) * N_p1 * N_e2;
+  const std::size_t d2 = std::size_t(N_T) * N_p1;
+  return kLbtHeader + 6 * dng + 4 * d3 + 2 * d2;
+}
+
+void LBT::SetTablePointers(double *b) {
+  typedef double Dng[temp_gn + 1][HQener_gn + 1];
+  typedef double D3[N_p1][N_e2];
+  typedef double D2[N_p1];
+  const std::size_t dng = std::size_t(t_gn + 2) * (temp_gn + 1) * (HQener_gn + 1);
+  const std::size_t d3 = std::size_t(N_T) * N_p1 * N_e2;
+  const std::size_t d2 = std::size_t(N_T) * N_p1;
+  double *q = b + kLbtHeader;
+  dNg_over_dt_c = reinterpret_cast<Dng *>(q); q += dng;
+  dNg_over_dt_q = reinterpret_cast<Dng *>(q); q += dng;
+  dNg_over_dt_g = reinterpret_cast<Dng *>(q); q += dng;
+  max_dNgfnc_c = reinterpret_cast<Dng *>(q); q += dng;
+  max_dNgfnc_q = reinterpret_cast<Dng *>(q); q += dng;
+  max_dNgfnc_g = reinterpret_cast<Dng *>(q); q += dng;
+  distFncB = reinterpret_cast<D3 *>(q); q += d3;
+  distFncF = reinterpret_cast<D3 *>(q); q += d3;
+  distMaxB = reinterpret_cast<D3 *>(q); q += d3;
+  distMaxF = reinterpret_cast<D3 *>(q); q += d3;
+  distFncBM = reinterpret_cast<D2 *>(q); q += d2;
+  distFncFM = reinterpret_cast<D2 *>(q);
+  table_block_ = b;
+}
+
+// The header identifies the layout, whether the radiation tables were read (KINT0), and
+// the table files by their total size in bytes: a cache made with other dimensions, KINT0
+// or table files of another size is not used.  Files of the same size but other content
+// are not detected, so still use one cache file per LBT-tables version (in its name).
+void LBT::WriteTableHeader(double *b) const {
+  static const char *const kFiles[] = {"distB.dat", "distF.dat", "dNg_over_dt_cD6.dat",
+                                       "dNg_over_dt_qD6.dat", "dNg_over_dt_gD6.dat",
+                                       "dNg_over_dt_qD7.dat", "dNg_over_dt_gD7.dat"};
+  const int n_files = (KINT0 != 0) ? 7 : 2;  // the radiation tables only when read
+  double bytes = 0.0;
+  for (int i = 0; i < n_files; i++) {
+    struct stat st;
+    if (stat((lbt_table_path_ + "/" + kFiles[i]).c_str(), &st) == 0)
+      bytes += double(st.st_size);
+  }
+  const double h[kLbtHeader] = {7742.0, 2.0, double(t_gn), double(temp_gn),
+                                double(HQener_gn), double(N_T), double(N_p1), double(N_e2),
+                                double(KINT0 != 0), bytes};
+  std::memcpy(b, h, sizeof h);
+}
+
+bool LBT::TableHeaderOK(const double *b) const {
+  double h[kLbtHeader];
+  WriteTableHeader(h);
+  return std::memcmp(b, h, sizeof h) == 0;
+}
+
+// true: the tables are mapped read-only from $LBT_TABLE_CACHE (read_tables must not parse
+// or write them).  false: a private zeroed block, for read_tables to fill.
+bool LBT::AttachTableBlock() {
+  const std::size_t bytes = TableBlockDoubles() * sizeof(double);
+  const char *path = std::getenv("LBT_TABLE_CACHE");
+  if (path && *path) {
+    const int fd = open(path, O_RDONLY);
+    if (fd >= 0) {
+      struct stat st;
+      void *m = MAP_FAILED;
+      if (fstat(fd, &st) == 0 && std::size_t(st.st_size) == bytes)
+        m = mmap(nullptr, bytes, PROT_READ, MAP_SHARED, fd, 0);
+      close(fd);
+      if (m != MAP_FAILED) {
+        if (TableHeaderOK(static_cast<const double *>(m))) {
+          SetTablePointers(static_cast<double *>(m));
+          JSINFO << "LBT: tables mapped read-only from " << path;
+          return true;
+        }
+        munmap(m, bytes);
+        JSWARN << "LBT: " << path << " does not match these tables; reading the text files";
+      }
+    }
+  }
+  double *b = static_cast<double *>(std::calloc(TableBlockDoubles(), sizeof(double)));
+  if (!b) {
+    JSWARN << "LBT: cannot allocate the tables";
+    exit(EXIT_FAILURE);
+  }
+  WriteTableHeader(b);
+  SetTablePointers(b);
+  return false;
+}
+
+// After parsing: write the block to $LBT_TABLE_CACHE (atomically: temporary file +
+// rename, so jobs starting together cannot read a half-written file) and switch this
+// process to the shared mapping as well.
+void LBT::PublishTableBlock() {
+  const char *path = std::getenv("LBT_TABLE_CACHE");
+  if (!path || !*path) return;
+  const std::size_t bytes = TableBlockDoubles() * sizeof(double);
+  const std::string tmp = std::string(path) + ".tmp." + std::to_string(getpid());
+  FILE *f = std::fopen(tmp.c_str(), "wb");
+  bool ok = f && std::fwrite(table_block_, 1, bytes, f) == bytes;
+  if (f && std::fclose(f) != 0) ok = false;
+  if (!ok || std::rename(tmp.c_str(), path) != 0) {
+    std::remove(tmp.c_str());
+    JSWARN << "LBT: could not write the table cache " << path << "; keeping a private copy";
+    return;
+  }
+  JSINFO << "LBT: wrote the table cache " << path;
+  double *priv = table_block_;
+  if (AttachTableBlock()) {
+    std::free(priv);
+  } else {                 // could not map it back: drop the new empty block, keep ours
+    std::free(table_block_);
+    SetTablePointers(priv);
+  }
+}
 
 LBT::LBT() {
   SetId("LBT");
@@ -1539,6 +1673,7 @@ void LBT::LBT0(int &n, double &ti) {
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
 void LBT::read_tables() {  // intialize various tables for LBT
+  const bool tables_mapped = AttachTableBlock();
 
   //     if(bulkFlag==1) { // read in OSU hydro profiles
   //         int dataID_in=1;
@@ -1588,8 +1723,8 @@ void LBT::read_tables() {  // intialize various tables for LBT
   }
   f11.close();
 
-  // read radiation table for heavy quark
-  if (KINT0 != 0) {
+  // read radiation table for heavy quark (not when mapped from the cache)
+  if (KINT0 != 0 && !tables_mapped) {
     ifstream f12(lbt_table_path_ + "/dNg_over_dt_cD6.dat");
     ifstream f13(lbt_table_path_ + "/dNg_over_dt_qD6.dat");
     ifstream f14(lbt_table_path_ + "/dNg_over_dt_gD6.dat");
@@ -1652,7 +1787,8 @@ void LBT::read_tables() {  // intialize various tables for LBT
     }
   }
 
-  // preparation for HQ 2->2
+  // preparation for HQ 2->2 (not when mapped from the cache)
+  if (!tables_mapped) {
   ifstream fileB(lbt_table_path_ + "/distB.dat");
   if (!fileB.is_open()) {
     cout << "Erro openning data file distB.dat!" << endl;
@@ -1698,6 +1834,9 @@ void LBT::read_tables() {  // intialize various tables for LBT
     }
   }
   fileF.close();
+  }
+  if (!tables_mapped)
+    PublishTableBlock();
 
   cout << "Initialization completed for LBT." << endl;
 }

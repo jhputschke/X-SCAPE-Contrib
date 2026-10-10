@@ -210,8 +210,8 @@ export OMP_NUM_THREADS=8        # also worth capping on many-core hosts
 ```
 
 (See MUSIC4GPU's [`docs/PORT_GPU.md`](https://github.com/jhputschke/MUSIC4GPU/blob/XSCAPE/docs/PORT_GPU.md)
-§9.10 for the full rationale; in a checkout of the pinned commit it is
-`external_packages/music4gpu/PORT_GPU.md`.)
+§9.10 for the full rationale; locally it is
+`external_packages/music4gpu/docs/PORT_GPU.md`.)
 
 To run JETSCAPE with MUSIC, one needs to use MPI commands,
 
